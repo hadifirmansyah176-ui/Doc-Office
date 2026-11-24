@@ -46,7 +46,7 @@ open class BaseActivity : AppCompatActivity() {
 
     fun safeName(name: String) = name.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "dokumen" }
 
-    private fun mimeFor(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
+    fun mimeFor(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
         "pdf" -> "application/pdf"
         "doc" -> "application/msword"
         "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
