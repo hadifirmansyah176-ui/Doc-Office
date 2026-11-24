@@ -17,7 +17,7 @@ class MainActivity : BaseActivity() {
             setPadding(48, 48, 48, 48)
         }
         box.addView(TextView(this).apply {
-            text = "Doc Viewer\nPDF • Word • Excel • PowerPoint"
+            text = "DocPDFviewer\nPDF • Word • Excel • PowerPoint"
             textSize = 20f
             gravity = Gravity.CENTER
         })
