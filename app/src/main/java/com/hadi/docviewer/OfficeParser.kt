@@ -46,7 +46,7 @@ object OfficeParser {
         } catch (e: Exception) {
             "<p>Gagal membaca file: ${esc(e.message ?: e.javaClass.simpleName)}</p>"
         }
-        return "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'>" +
+        return "<html><head><meta name='viewport' content='width=device-width, initial-scale=1, minimum-scale=0.5, maximum-scale=5'>" +
                 "<style>body{font-family:sans-serif;padding:12px;line-height:1.5}" +
                 "table{border-collapse:collapse;margin:8px 0}td{border:1px solid #999;padding:4px 8px;vertical-align:top}" +
                 ".slide{border:1px solid #bbb;border-radius:8px;padding:12px;margin:16px 0;background:#fafafa}" +

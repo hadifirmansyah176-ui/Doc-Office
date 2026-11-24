@@ -2,18 +2,17 @@ package com.hadi.docviewer
 
 import android.os.Bundle
 import android.webkit.WebView
-import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
 import kotlin.concurrent.thread
 
-class OfficeViewerActivity : AppCompatActivity() {
+class OfficeViewerActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val name = intent.getStringExtra("name") ?: "Dokumen"
         title = name
         val web = WebView(this).apply {
+            settings.setSupportZoom(true)              // cubit dua jari untuk zoom
             settings.builtInZoomControls = true
-            settings.displayZoomControls = false
+            settings.displayZoomControls = false       // sembunyikan tombol +/- bawaan
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
         }

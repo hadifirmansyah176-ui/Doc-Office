@@ -13,6 +13,8 @@ data class PdfEdit(val page: Int, val l: Float, val t: Float, val r: Float, val 
 
 /** Satu halaman PDF. Mode edit: tekan-tahan lalu seret untuk memilih area teks yang diganti. */
 class PageView(ctx: Context) : AppCompatImageView(ctx) {
+    init { scaleType = android.widget.ImageView.ScaleType.FIT_XY }
+
     var editMode = false
     var edits: List<PdfEdit> = emptyList()
     var onArea: ((Float, Float, Float, Float) -> Unit)? = null   // pecahan 0..1 dari lebar/tinggi halaman

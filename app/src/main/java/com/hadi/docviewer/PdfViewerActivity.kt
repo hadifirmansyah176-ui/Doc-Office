@@ -1,5 +1,6 @@
 package com.hadi.docviewer
 
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
@@ -8,11 +9,13 @@ import android.os.ParcelFileDescriptor
 import android.view.Menu
 import android.view.MenuItem
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
@@ -21,15 +24,22 @@ import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import java.io.File
 import kotlin.concurrent.thread
+import kotlin.math.abs
 
-class PdfViewerActivity : AppCompatActivity() {
+class PdfViewerActivity : BaseActivity() {
 
     private val edits = mutableListOf<PdfEdit>()
     private var editMode = false
+    private var zoom = 1f
+
     private lateinit var src: File
     private lateinit var renderer: PdfRenderer
     private lateinit var pfd: ParcelFileDescriptor
     private lateinit var list: RecyclerView
+    private lateinit var hsv: HorizontalScrollView
+    private lateinit var zoomLayout: ZoomLayout
+
+    private fun screenW() = resources.displayMetrics.widthPixels
 
     private val saver = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         if (uri == null) return@registerForActivityResult
@@ -58,12 +68,23 @@ class PdfViewerActivity : AppCompatActivity() {
             Toast.makeText(this, "Gagal membuka PDF (terproteksi password / rusak?)", Toast.LENGTH_LONG).show()
             return finish()
         }
+
         list = RecyclerView(this).apply {
             layoutManager = LinearLayoutManager(this@PdfViewerActivity)
             setBackgroundColor(Color.DKGRAY)
             adapter = PageAdapter()
         }
-        setContentView(list)
+        // RecyclerView di dalam HorizontalScrollView: geser atas-bawah untuk halaman, kiri-kanan saat diperbesar
+        hsv = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(list, FrameLayout.LayoutParams(screenW(), ViewGroup.LayoutParams.MATCH_PARENT))
+        }
+        zoomLayout = ZoomLayout(this).apply {
+            setBackgroundColor(Color.DKGRAY)
+            addView(hsv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            onZoomEnd = { f, x, y -> commitZoom(f, x, y) }
+        }
+        setContentView(zoomLayout)
     }
 
     override fun onDestroy() {
@@ -71,12 +92,50 @@ class PdfViewerActivity : AppCompatActivity() {
         try { renderer.close(); pfd.close() } catch (_: Exception) {}
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (!::list.isInitialized) return
+        list.layoutParams.width = (screenW() * zoom).toInt()
+        list.requestLayout()
+        list.adapter?.notifyDataSetChanged()
+    }
+
+    // ---------- Zoom ----------
+    /** Terapkan zoom baru: lebar daftar halaman diubah lalu halaman dirender ulang, posisi jari dipertahankan. */
+    private fun commitZoom(factor: Float, fx: Float, fy: Float) {
+        val newZoom = (zoom * factor).coerceIn(1f, 4f)
+        val r = newZoom / zoom
+        if (abs(r - 1f) < 0.02f) return
+
+        val lm = list.layoutManager as LinearLayoutManager
+        val probeX = (hsv.scrollX + fx).coerceIn(0f, (list.width - 1).toFloat())
+        val child = list.findChildViewUnder(probeX, fy)
+        val pos = child?.let { list.getChildAdapterPosition(it) }?.takeIf { it >= 0 }
+            ?: lm.findFirstVisibleItemPosition().coerceAtLeast(0)
+        val top = child?.top ?: (lm.findViewByPosition(pos)?.top ?: 0)
+        val newTop = (fy - (fy - top) * r).toInt()
+        val newScrollX = ((hsv.scrollX + fx) * r - fx).toInt().coerceAtLeast(0)
+
+        zoom = newZoom
+        zoomLayout.currentZoom = zoom
+        list.layoutParams.width = (screenW() * zoom).toInt()
+        list.requestLayout()
+        list.adapter?.notifyDataSetChanged()
+        lm.scrollToPositionWithOffset(pos, newTop)
+        hsv.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                hsv.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                hsv.scrollTo(newScrollX, 0)
+            }
+        })
+    }
+
     // ---------- Menu ----------
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, 1, 0, "Mode Edit Teks").isCheckable = true
         menu.add(0, 2, 1, "Batalkan perubahan terakhir")
         menu.add(0, 3, 2, "Simpan PDF")
-        return true
+        return super.onCreateOptionsMenu(menu)      // + Buka File, Tentang
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
@@ -91,6 +150,7 @@ class PdfViewerActivity : AppCompatActivity() {
             2 -> if (edits.isNotEmpty()) { edits.removeAt(edits.lastIndex); list.adapter?.notifyDataSetChanged() }
             3 -> if (edits.isEmpty()) Toast.makeText(this, "Belum ada perubahan", Toast.LENGTH_SHORT).show()
                  else saver.launch("edit_${title}")
+            else -> return super.onOptionsItemSelected(item)
         }
         return true
     }
@@ -154,18 +214,31 @@ class PdfViewerActivity : AppCompatActivity() {
         }
 
         override fun onBindViewHolder(h: VH, position: Int) {
-            val width = resources.displayMetrics.widthPixels
+            val viewW = (screenW() * zoom).toInt()
             renderer.openPage(position).use { page ->
-                val height = (width.toFloat() * page.height / page.width).toInt()
-                val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                val ratio = page.height.toFloat() / page.width
+                val viewH = (viewW * ratio).toInt()
+                // Batasi ukuran bitmap agar memori aman; di atas batas ini gambar hanya diskalakan
+                var rw = minOf(viewW, 2000)
+                var bmp: Bitmap
+                try {
+                    bmp = Bitmap.createBitmap(rw, (rw * ratio).toInt(), Bitmap.Config.ARGB_8888)
+                } catch (oom: OutOfMemoryError) {
+                    rw = screenW()
+                    bmp = Bitmap.createBitmap(rw, (rw * ratio).toInt(), Bitmap.Config.ARGB_8888)
+                }
                 bmp.eraseColor(Color.WHITE)
                 page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                h.v.layoutParams.height = height
+                h.v.layoutParams.height = viewH
                 h.v.setImageBitmap(bmp)
             }
             h.v.editMode = editMode
             h.v.edits = edits.filter { it.page == position }
             h.v.onArea = { l, t, r, b -> askText(position, l, t, r, b) }
+        }
+
+        override fun onViewRecycled(h: VH) {
+            h.v.setImageDrawable(null)      // lepas bitmap supaya memori cepat bebas
         }
     }
 }
