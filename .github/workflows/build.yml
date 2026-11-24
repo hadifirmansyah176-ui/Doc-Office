@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
     steps:
       - uses: actions/checkout@v4
 
@@ -23,7 +25,24 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug --stacktrace
 
+      # Langkah release hanya jalan kalau secret keystore sudah diisi
+      - name: Siapkan keystore
+        if: env.KEYSTORE_B64 != ''
+        run: echo "$KEYSTORE_B64" | base64 -d > "$GITHUB_WORKSPACE/release.keystore"
+
+      - name: Build release APK (bertanda tangan)
+        if: env.KEYSTORE_B64 != ''
+        env:
+          KEYSTORE_FILE: ${{ github.workspace }}/release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: gradle assembleRelease --stacktrace
+
       - uses: actions/upload-artifact@v4
         with:
-          name: DocViewer-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: DocViewer-apk
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: ignore
