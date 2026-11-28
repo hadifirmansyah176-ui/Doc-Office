@@ -54,6 +54,7 @@ class DocExporter(private val act: Activity, private val html: String) {
             try { WebView.enableSlowWholeDocumentDraw() } catch (_: Throwable) {}
             val w = WebView(act)
             web = w
+            w.settings.javaScriptEnabled = true      // untuk menghitung batas halaman
             w.settings.useWideViewPort = true
             w.settings.loadWithOverviewMode = true
             w.alpha = 0.01f
@@ -66,12 +67,13 @@ class DocExporter(private val act: Activity, private val html: String) {
                     // beri waktu sebentar supaya tata letak selesai
                     w.postDelayed({
                         w.evaluateJavascript(planJs) { raw ->
-                            try {
-                                val s = JSONTokener(raw).nextValue() as String
-                                onReady(buildPlan(JSONObject(s)))
+                            val plan: Plan? = try {
+                                val v = JSONTokener(raw ?: "null").nextValue()
+                                if (v is String) buildPlan(JSONObject(v)) else fallbackPlan(w)
                             } catch (t: Throwable) {
-                                onError(t.message ?: t.javaClass.simpleName)
+                                fallbackPlan(w)
                             }
+                            if (plan != null) onReady(plan) else onError("Dokumen tidak bisa diukur")
                         }
                     }, 400)
                 }
@@ -79,6 +81,28 @@ class DocExporter(private val act: Activity, private val html: String) {
             w.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
         } catch (t: Throwable) {
             onError(t.message ?: t.javaClass.simpleName)
+        }
+    }
+
+    /** Cadangan kalau skrip penghitung tidak jalan: bagi rata per tinggi halaman A4. */
+    private fun fallbackPlan(w: WebView): Plan? {
+        return try {
+            val vw = w.width
+            if (vw <= 0) return null
+            w.measure(
+                View.MeasureSpec.makeMeasureSpec(vw, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            )
+            val fullH = w.measuredHeight.toDouble()
+            if (fullH <= 0.0) return null
+            val pageH = vw * 842.0 / 595.0
+            val cuts = arrayListOf(0.0)
+            var y = 0.0
+            while (y + pageH < fullH) { y += pageH; cuts.add(y) }
+            cuts.add(fullH)
+            Plan(cuts, vw.toDouble(), fullH)    // satuan piksel perangkat -> skala 1
+        } catch (t: Throwable) {
+            null
         }
     }
 
